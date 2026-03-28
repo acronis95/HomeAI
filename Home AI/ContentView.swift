@@ -1,56 +1,80 @@
-//
-//  ContentView.swift
-//  Home AI
-//
-//  Created by Chris on 28/3/2026.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @StateObject private var gateway = OpenClawGatewayClient()
+    @StateObject private var settings = AppSettings()
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        NavigationStack {
+            Form {
+                Section("Connection") {
+                    TextField("Gateway URL override", text: $settings.gatewayURLOverride)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Gateway token (optional)", text: $settings.gatewayToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Setup code", text: $settings.setupCode, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+
+                Section("Status") {
+                    Text(statusText)
+                        .foregroundStyle(statusColor)
+                }
+
+                Section("Actions") {
+                    Button("Connect") { gateway.connect(using: settings) }
+                    Button("Disconnect", role: .destructive) { gateway.disconnect() }
+                    Button("Clear Logs") { gateway.clearLogs() }
+                }
+
+                Section("Logs") {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(gateway.logLines.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
                     }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+                    .frame(minHeight: 240)
                 }
             }
-        } detail: {
-            Text("Select an item")
+            .navigationTitle("Home AI")
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private var statusText: String {
+        switch gateway.state {
+        case .idle:
+            return "Idle"
+        case .connecting:
+            return "Connecting"
+        case .waitingForChallenge:
+            return "Waiting for challenge"
+        case .waitingForApproval(let requestId):
+            return "Waiting for approval\(requestId.map { " (\($0))" } ?? "")"
+        case .connected:
+            return "Connected"
+        case .failed(let message):
+            return "Failed: \(message)"
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    private var statusColor: Color {
+        switch gateway.state {
+        case .connected:
+            return .green
+        case .waitingForApproval:
+            return .orange
+        case .failed:
+            return .red
+        default:
+            return .primary
         }
     }
 }
